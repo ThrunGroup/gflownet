@@ -21,19 +21,37 @@ from botorch.fit import fit_gpytorch_model
 from botorch.models import SingleTaskGP
 from torch.utils.data import TensorDataset, DataLoader
 
-from toy_grid_dag import GridEnv, func_cos_N, func_corners_floor_A, func_corners_floor_B, func_corners
-from toy_grid_dag import make_mlp, make_opt, SplitCategorical, compute_empirical_distribution_error, set_device
-from toy_grid_dag import ReplayBuffer, FlowNetAgent, MARSAgent, MHAgent, RandomTrajAgent, PPOAgent
-
+from toy_grid_dag import (
+    GridEnv,
+    func_cos_N,
+    func_corners_floor_A,
+    func_corners_floor_B,
+    func_corners,
+)
+from toy_grid_dag import (
+    make_mlp,
+    make_opt,
+    SplitCategorical,
+    compute_empirical_distribution_error,
+    set_device,
+)
+from toy_grid_dag import (
+    ReplayBuffer,
+    FlowNetAgent,
+    MARSAgent,
+    MHAgent,
+    RandomTrajAgent,
+    PPOAgent,
+)
 
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--save_path", default='results/e2e', type=str)
-parser.add_argument("--init_data_path", default='results/e2e', type=str)
+parser.add_argument("--save_path", default="results/e2e", type=str)
+parser.add_argument("--init_data_path", default="results/e2e", type=str)
 parser.add_argument("--learning_rate", default=2.5e-5, help="Learning rate", type=float)
-parser.add_argument("--method", default='ppo', type=str)
-parser.add_argument("--opt", default='adam', type=str)
+parser.add_argument("--method", default="ppo", type=str)
+parser.add_argument("--opt", default="adam", type=str)
 parser.add_argument("--adam_beta1", default=0.9, type=float)
 parser.add_argument("--adam_beta2", default=0.999, type=float)
 parser.add_argument("--momentum", default=0.9, type=float)
@@ -47,9 +65,13 @@ parser.add_argument("--ndim", default=4, type=int)
 parser.add_argument("--n_hid", default=256, type=int)
 parser.add_argument("--n_layers", default=2, type=int)
 parser.add_argument("--n_train_steps", default=300, type=int)
-parser.add_argument("--num_empirical_loss", default=200000, type=int,
-                    help="Number of samples used to compute the empirical distribution loss")
-parser.add_argument('--func', default='corners_floor_B')
+parser.add_argument(
+    "--num_empirical_loss",
+    default=200000,
+    type=int,
+    help="Number of samples used to compute the empirical distribution loss",
+)
+parser.add_argument("--func", default="corners_floor_B")
 parser.add_argument("--num_val_iters", default=500, type=int)
 parser.add_argument("--reward_topk", default=5, type=int)
 parser.add_argument("--reward_lambda", default=0, type=float)
@@ -58,24 +80,28 @@ parser.add_argument("--num_samples", default=8, type=int)
 parser.add_argument("--num_init_points", default=10, type=int)
 parser.add_argument("--num_val_points", default=128, type=int)
 parser.add_argument("--num_iter", default=10, type=int)
-parser.add_argument("--use_model", action='store_true')
+parser.add_argument("--use_model", action="store_true")
 
-parser.add_argument("--replay_strategy", default='none', type=str) # top_k none
+parser.add_argument("--replay_strategy", default="none", type=str)  # top_k none
 parser.add_argument("--replay_sample_size", default=2, type=int)
 parser.add_argument("--replay_buf_size", default=100, type=float)
 
-parser.add_argument("--ppo_num_epochs", default=32, type=int) # number of SGD steps per epoch
-parser.add_argument("--ppo_epoch_size", default=16, type=int) # number of sampled minibatches per epoch
+parser.add_argument(
+    "--ppo_num_epochs", default=32, type=int
+)  # number of SGD steps per epoch
+parser.add_argument(
+    "--ppo_epoch_size", default=16, type=int
+)  # number of sampled minibatches per epoch
 parser.add_argument("--ppo_clip", default=0.2, type=float)
 parser.add_argument("--ppo_entropy_coef", default=4e-1, type=float)
-parser.add_argument("--clip_grad_norm", default=0., type=float)
+parser.add_argument("--clip_grad_norm", default=0.0, type=float)
 
 
 # This is alpha in the note, smooths the learned distribution into a uniform exploratory one
-parser.add_argument("--device", default='cpu', type=str)
-parser.add_argument("--progress", action='store_true')
-dev = torch.device('cpu')
-_dev = [torch.device('cpu')]
+parser.add_argument("--device", default="cpu", type=str)
+parser.add_argument("--progress", action="store_true")
+dev = torch.device("cpu")
+_dev = [torch.device("cpu")]
 tf = lambda x: torch.FloatTensor(x).to(_dev[0])
 tl = lambda x: torch.LongTensor(x).to(_dev[0])
 
@@ -158,8 +184,14 @@ def generate_batch(args, agent, dataset, env):
 def update_proxy(args, data):
     # Train proxy(GP) on collected data
     train_x, train_y = data
-    model = SingleTaskGP(train_x.to(dev), train_y.unsqueeze(-1).to(dev),
-                         covar_module=gpytorch.kernels.ScaleKernel(gpytorch.kernels.MaternKernel(nu=0.5), lengthscale_prior=gpytorch.priors.GammaPrior(0.5, 2.5)))
+    model = SingleTaskGP(
+        train_x.to(dev),
+        train_y.unsqueeze(-1).to(dev),
+        covar_module=gpytorch.kernels.ScaleKernel(
+            gpytorch.kernels.MaternKernel(nu=0.5),
+            lengthscale_prior=gpytorch.priors.GammaPrior(0.5, 2.5),
+        ),
+    )
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(model.likelihood, model)
     fit_gpytorch_model(mll)
     return model
@@ -168,23 +200,32 @@ def update_proxy(args, data):
 def diverse_topk_mean_reward(args, d_prev, d):
     topk_new, new_indices = torch.topk(d[1], k=args.reward_topk)
     topk_old, old_indices = torch.topk(d_prev[1], k=args.reward_topk)
-    new_reward = topk_new.mean() + args.reward_lambda * get_pairwise_distances(d[0][new_indices].cpu().numpy())
-    old_reward = topk_old.mean() + args.reward_lambda * get_pairwise_distances(d_prev[0][old_indices].cpu().numpy())
+    new_reward = topk_new.mean() + args.reward_lambda * get_pairwise_distances(
+        d[0][new_indices].cpu().numpy()
+    )
+    old_reward = topk_old.mean() + args.reward_lambda * get_pairwise_distances(
+        d_prev[0][old_indices].cpu().numpy()
+    )
     return (new_reward - old_reward).item()
 
 
 def get_pairwise_distances(arr):
-    return np.mean(np.tril(distance_matrix(arr, arr))) * 2 / (arr.shape[0] * (arr.shape[0] - 1))
+    return (
+        np.mean(np.tril(distance_matrix(arr, arr)))
+        * 2
+        / (arr.shape[0] * (arr.shape[0] - 1))
+    )
 
 
 def main(args):
     args.dev = torch.device(args.device)
     set_device(args.dev)
-    f = {'default': None,
-         'cos_N': func_cos_N,
-         'corners': func_corners,
-         'corners_floor_A': func_corners_floor_A,
-         'corners_floor_B': func_corners_floor_B,
+    f = {
+        "default": None,
+        "cos_N": func_cos_N,
+        "corners": func_corners,
+        "corners_floor_A": func_corners_floor_A,
+        "corners_floor_B": func_corners_floor_B,
     }[args.func]
 
     # Main Loop
@@ -215,30 +256,31 @@ def main(args):
         dataset = new_dataset
         # distrib_distances.append(metrics)
         model = update_proxy(args, dataset)
-        pickle.dump({
-            'metrics': metrics,
-            'rewards': reward,
-            'args': args
-        }, gzip.open(os.path.join(base_path, 'result.pkl.gz'), 'wb'))
+        pickle.dump(
+            {"metrics": metrics, "rewards": reward, "args": args},
+            gzip.open(os.path.join(base_path, "result.pkl.gz"), "wb"),
+        )
 
 
 def train_generative_model(args, f):
-    args.is_mcmc = args.method in ['mars', 'mcmc']
+    args.is_mcmc = args.method in ["mars", "mcmc"]
 
     env = GridEnv(args.horizon, args.ndim, func=f, allow_backward=args.is_mcmc)
-    envs = [GridEnv(args.horizon, args.ndim, func=f, allow_backward=args.is_mcmc)
-            for i in range(args.bufsize)]
+    envs = [
+        GridEnv(args.horizon, args.ndim, func=f, allow_backward=args.is_mcmc)
+        for i in range(args.bufsize)
+    ]
     ndim = args.ndim
 
-    if args.method == 'flownet':
+    if args.method == "flownet":
         agent = FlowNetAgent(args, envs)
-    elif args.method == 'mars':
+    elif args.method == "mars":
         agent = MARSAgent(args, envs)
-    elif args.method == 'mcmc':
+    elif args.method == "mcmc":
         agent = MHAgent(args, envs)
-    elif args.method == 'ppo':
+    elif args.method == "ppo":
         agent = PPOAgent(args, envs)
-    elif args.method == 'random_traj':
+    elif args.method == "random_traj":
         agent = RandomTrajAgent(args, envs)
 
     opt = make_opt(agent.parameters(), args)
@@ -248,50 +290,63 @@ def train_generative_model(args, f):
     all_visited = []
     empirical_distrib_losses = []
     ttsr = max(int(args.train_to_sample_ratio), 1)
-    sttr = max(int(1/args.train_to_sample_ratio), 1) # sample to train ratio
+    sttr = max(int(1 / args.train_to_sample_ratio), 1)  # sample to train ratio
 
-    if args.method == 'ppo':
+    if args.method == "ppo":
         ttsr = args.ppo_num_epochs
         sttr = args.ppo_epoch_size
 
-    for i in tqdm(range(args.n_train_steps+1), disable=not args.progress):
+    for i in tqdm(range(args.n_train_steps + 1), disable=not args.progress):
         data = []
         for j in range(sttr):
             data += agent.sample_many(args.mbsize, all_visited)
         for j in range(ttsr):
-            losses = agent.learn_from(i * ttsr + j, data) # returns (opt loss, *metrics)
+            losses = agent.learn_from(
+                i * ttsr + j, data
+            )  # returns (opt loss, *metrics)
             if losses is not None:
                 losses[0].backward()
                 if args.clip_grad_norm > 0:
-                    torch.nn.utils.clip_grad_norm_(agent.parameters(),
-                                                   args.clip_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(
+                        agent.parameters(), args.clip_grad_norm
+                    )
                 opt.step()
                 opt.zero_grad()
                 all_losses.append([i.item() for i in losses])
 
         if not i % 100:
             empirical_distrib_losses.append(
-                compute_empirical_distribution_error(env, all_visited[-args.num_empirical_loss:]))
+                compute_empirical_distribution_error(
+                    env, all_visited[-args.num_empirical_loss :]
+                )
+            )
             if args.progress:
                 k1, kl = empirical_distrib_losses[-1]
-                print('empirical L1 distance', k1, 'KL', kl)
+                print("empirical L1 distance", k1, "KL", kl)
                 if len(all_losses):
-                    print(*[f'{np.mean([i[j] for i in all_losses[-100:]]):.3f}'
-                            for j in range(len(all_losses[0]))])
+                    print(
+                        *[
+                            f"{np.mean([i[j] for i in all_losses[-100:]]):.3f}"
+                            for j in range(len(all_losses[0]))
+                        ]
+                    )
 
     # root = os.path.split(args.save_path)[0]
     # os.makedirs(root, exist_ok=True)
     # pickle.dump(
-    metrics = {'losses': np.float32(all_losses),
-         'model': agent.model.to('cpu') if agent.model else None,
-         'visited': np.int8(all_visited),
-         'emp_dist_loss': empirical_distrib_losses}# ,
-        #  'true_d': env.true_density()[0],
-        #  'args':args} #,
-        # gzip.open(args.save_path, 'wb'))
+    metrics = {
+        "losses": np.float32(all_losses),
+        "model": agent.model.to("cpu") if agent.model else None,
+        "visited": np.int8(all_visited),
+        "emp_dist_loss": empirical_distrib_losses,
+    }  # ,
+    #  'true_d': env.true_density()[0],
+    #  'args':args} #,
+    # gzip.open(args.save_path, 'wb'))
     return agent, metrics
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     args = parser.parse_args()
     torch.set_num_threads(1)
     main(args)
